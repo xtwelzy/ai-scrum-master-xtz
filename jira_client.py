@@ -49,6 +49,13 @@ def create_epic(summary: str, description: str, assignee_id: str | None, estimat
 
     return requests.post(url, json={"fields": fields}, headers=headers, auth=auth).json()
 
+def add_comment(issue_key: str, comment: str):
+    url = f"{JIRA_DOMAIN}/rest/api/3/issue/{issue_key}/comment"
+    payload = {
+        "body": adf(comment)  # используем твою функцию adf для ADF текста
+    }
+    return requests.post(url, json=payload, headers=headers, auth=auth).json()
+
 def create_story(summary: str, description: str, epic_key: str, assignee_id: str | None, estimate: str | None = None):
     url = f"{JIRA_DOMAIN}/rest/api/3/issue"
 

@@ -1,7 +1,6 @@
-
 import json
 from openai import OpenAI
-from config import OPENAI_API_KEY
+from config import OPENAI_API_KEY, TEAM
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -9,14 +8,22 @@ def generate_agile_structure(text: str) -> str:
     """
     Создаём Agile структуру (Epic → Features → Stories → Tasks → Subtasks)
     Модель обязана вернуть ЧИСТЫЙ JSON.
-    Добавлены оценки времени (estimate).
     """
+
+    team_list = ", ".join(TEAM.keys())
 
     prompt = f"""
 Ты — Senior Agile Scrum Master и Tech Lead.
 Сгенерируй Agile структуру в формате строгого JSON.
 
-ДОБАВЬ поле "estimate" в ЧАСАХ И МИНУТАХ: пример "4h", "30m", "1h 30m".
+⚠️ ОЧЕНЬ ВАЖНО:
+Используй ТОЛЬКО следующих участников команды для назначения исполнителей:
+{team_list}
+
+Не придумывай новых людей и не используй других имён.  
+Если исполнитель не указан — ставь None (пустую строку), бот назначит его сам.
+
+Добавь поле "estimate" в ЧАСАХ И МИНУТАХ: пример "4h", "30m", "1h 30m".
 
 Правила оценки:
 - Простые действия → 15–60 минут
@@ -30,26 +37,31 @@ def generate_agile_structure(text: str) -> str:
   "epic": {{
     "summary": "string",
     "description": "string",
-    "estimate": "string"
+    "estimate": "string",
+    "assignee": "string или пустая строка"
   }},
   "features": [
     {{
       "summary": "string",
       "estimate": "string",
+      "assignee": "string или пустая строка",
       "stories": [
         {{
           "summary": "string",
           "estimate": "string",
+          "assignee": "string или пустая строка",
           "tasks": [
             {{
               "summary": "string",
               "description": "string",
               "estimate": "string",
+              "assignee": "string или пустая строка",
               "subtasks": [
                 {{
                   "summary": "string",
                   "description": "string",
-                  "estimate": "string"
+                  "estimate": "string",
+                  "assignee": "string или пустая строка"
                 }}
               ]
             }}
@@ -65,7 +77,9 @@ def generate_agile_structure(text: str) -> str:
 - НЕ используй markdown.
 - НЕ используй ```json.
 - НЕ добавляй текст до или после JSON.
+- НЕ ДОБАВЛЯЙ ПОЛЕ "assignee". Оно будет назначено ПОСЛЕ пользователем.
 - Оценка ("estimate") обязательна.
+- assignee только из списка: {team_list} или "" (пусто).
 - Значения estimate: только форматы "4h", "30m", "1h 30m".
 
 Техническое задание:
