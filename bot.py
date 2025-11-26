@@ -1,4 +1,5 @@
 import asyncio
+import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -12,20 +13,20 @@ from utils import parse_agile_json
 
 from openai import OpenAI
 
-# -------------------------------
+# ---------------------------------------
 # OpenAI client
-# -------------------------------
+# ---------------------------------------
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# -------------------------------
+# ---------------------------------------
 # Bot initialization
-# -------------------------------
+# ---------------------------------------
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# -------------------------------
+# ---------------------------------------
 # FSM STATES
-# -------------------------------
+# ---------------------------------------
 
 class AssignStates(StatesGroup):
     choosing_assignee = State()
@@ -33,9 +34,9 @@ class AssignStates(StatesGroup):
     custom_time_input = State()
 
 
-# -------------------------------
+# ---------------------------------------
 # ASSIGNMENT HELPERS
-# -------------------------------
+# ---------------------------------------
 
 rr_index = 0
 
@@ -73,12 +74,12 @@ def get_assignee(raw):
     return next_assignee()
 
 
-# -------------------------------
+# ---------------------------------------
 # CASCADE ASSIGNEE LOGIC
-# -------------------------------
+# ---------------------------------------
 
 def cascade_assignee(feature):
-    """Propagate assigned person down: story → task → subtasks"""
+    """Propagate assigned person to story → task → subtasks"""
     root = feature.get("assignee")
     if not root:
         return
@@ -96,9 +97,9 @@ def cascade_assignee(feature):
                     sub["assignee"] = root
 
 
-# -------------------------------
+# ---------------------------------------
 # NORMALIZER
-# -------------------------------
+# ---------------------------------------
 
 def normalize_structure(js):
     js["epic"].setdefault("estimate", "1h")
@@ -121,9 +122,9 @@ def normalize_structure(js):
     return js
 
 
-# -------------------------------
+# ---------------------------------------
 # KEYBOARDS
-# -------------------------------
+# ---------------------------------------
 
 def kb_start_assignment():
     kb = InlineKeyboardBuilder()
@@ -192,9 +193,9 @@ def kb_final_actions():
     return kb.as_markup()
 
 
-# -------------------------------
+# ---------------------------------------
 # PREVIEW RENDER
-# -------------------------------
+# ---------------------------------------
 
 def render_full_preview(js):
     txt = "📋 *ПОЛНАЯ СТРУКТУРА ПРОЕКТА*\n\n"
@@ -219,13 +220,13 @@ def render_full_preview(js):
     return txt
 
 
-# -------------------------------
+# ---------------------------------------
 # COMMANDS
-# -------------------------------
+# ---------------------------------------
 
 @dp.message(Command("start"))
 async def start_cmd(msg: types.Message):
-    await msg.answer("👋 Привет! Отправь /create <ТЗ> или пришли голосовое сообщение.")
+    await msg.answer("👋 Привет! Отправь /create <ТЗ>, голосовое, аудио или видео.")
 
 
 @dp.message(Command("create"))
@@ -247,9 +248,9 @@ async def create_cmd(msg: types.Message, state: FSMContext):
         await msg.answer(preview, parse_mode="Markdown", reply_markup=kb_start_assignment())
 
 
-# -------------------------------
+# ---------------------------------------
 # ASSIGNEE FLOW
-# -------------------------------
+# ---------------------------------------
 
 @dp.callback_query(lambda c: c.data == "start_assignees")
 async def start_assignees(cb, state: FSMContext):
@@ -293,9 +294,9 @@ async def apply_assignee(cb, state: FSMContext):
         )
 
 
-# -------------------------------
+# ---------------------------------------
 # TIME FLOW
-# -------------------------------
+# ---------------------------------------
 
 @dp.callback_query(lambda c: c.data == "edit_time")
 async def edit_time_start(cb, state):
@@ -349,14 +350,14 @@ async def custom_time_set(msg, state):
     await state.update_data(structure=js)
 
     preview = render_full_preview(js)
-    await msg.answer(preview, parse_mode="Markdown", reply_markup=kb_final_actions())
+    await msg.print(preview, parse_mode="Markdown", reply_markup=kb_final_actions())
 
     await state.set_state(AssignStates.choosing_time)
 
 
-# -------------------------------
+# ---------------------------------------
 # CANCEL
-# -------------------------------
+# ---------------------------------------
 
 @dp.callback_query(lambda c: c.data == "cancel_all")
 async def cancel_all(cb, state):
@@ -364,9 +365,9 @@ async def cancel_all(cb, state):
     await cb.message.answer("❌ Операция отменена.")
 
 
-# -------------------------------
+# ---------------------------------------
 # JIRA SYNC
-# -------------------------------
+# ---------------------------------------
 
 @dp.callback_query(lambda c: c.data == "create_jira")
 async def jira_create(cb, state):
@@ -375,7 +376,6 @@ async def jira_create(cb, state):
     data = await state.get_data()
     js = data["structure"]
 
-    # propagate
     for f in js["features"]:
         cascade_assignee(f)
 
@@ -448,18 +448,16 @@ async def jira_create(cb, state):
     await state.clear()
 
 
-# -------------------------------
-#  🔥 VOICE RECOGNITION
-# -------------------------------
-
-# -------------------------------
-#  🔥 VOICE RECOGNITION (СТАБИЛЬНАЯ)
-# -------------------------------
+# ======================================================
+# 🔥  VOICE / AUDIO / VIDEO RECOGNITION (Whisper-1)
+# ======================================================
 
 def transcribe_voice(filepath: str) -> str:
     """
-    Whisper-1 — стабильная транскрипция для .oga / .opus
-    Работает на старом OpenAI SDK (client.audio.transcriptions.create)
+    Универсальная транскрипция:
+    • голосовые (.oga)
+    • аудио (mp3, wav, opus…)
+    • видео (mp4, mov, webm, mkv — звук вытаскивается)
     """
     with open(filepath, "rb") as f:
         result = client.audio.transcriptions.create(
@@ -470,18 +468,13 @@ def transcribe_voice(filepath: str) -> str:
     return result
 
 
+async def _process_media(msg: types.Message, state: FSMContext, file_id: str, ext: str):
+    """Обработка аудио/видео — единая логика"""
+    local = f"input.{ext}"
 
+    f = await bot.get_file(file_id)
+    await bot.download_file(f.file_path, local)
 
-@dp.message(lambda m: m.voice is not None)
-async def handle_voice(msg: types.Message, state: FSMContext):
-    await msg.answer("🎧 Получил аудио, распознаю...")
-
-    # download file
-    file = await bot.get_file(msg.voice.file_id)
-    local = "voice.oga"
-    await bot.download_file(file.file_path, local)
-
-    # run whisper sync in executor
     loop = asyncio.get_running_loop()
     try:
         text = await loop.run_in_executor(None, transcribe_voice, local)
@@ -505,8 +498,32 @@ async def handle_voice(msg: types.Message, state: FSMContext):
     )
 
 
+# ========= VOICE ==========
+@dp.message(lambda m: m.voice is not None)
+async def handle_voice(msg: types.Message, state: FSMContext):
+    return await _process_media(msg, state, msg.voice.file_id, "oga")
+
+
+# ========= AUDIO ==========
+@dp.message(lambda m: m.audio is not None)
+async def handle_audio(msg: types.Message, state: FSMContext):
+    file = msg.audio
+    ext = (file.file_name.split(".")[-1] if file.file_name else "mp3")
+    return await _process_media(msg, state, file.file_id, ext)
+
+
+# ========= VIDEO ==========
+@dp.message(lambda m: m.video is not None)
+async def handle_video(msg: types.Message, state: FSMContext):
+    return await _process_media(msg, state, msg.video.file_id, "mp4")
+
+
+# ---------------------------------------
+# BUILD STRUCTURE FROM VOICE
+# ---------------------------------------
+
 @dp.callback_query(lambda c: c.data == "voice_to_create")
-async def voice_generate(cb, state):
+async def voice_generate(cb, state: FSMContext):
     data = await state.get_data()
     transcript = data.get("voice_transcript", "")
 
@@ -524,9 +541,9 @@ async def voice_generate(cb, state):
         await cb.message.answer(preview, parse_mode="Markdown", reply_markup=kb_start_assignment())
 
 
-# -------------------------------
+# ---------------------------------------
 # RUN BOT
-# -------------------------------
+# ---------------------------------------
 
 def run_bot():
     dp.run_polling(bot)
