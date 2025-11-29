@@ -89,11 +89,6 @@ ai-scrum-master/
 └── README.md
 ```
 
-<h2 align="center">🎨 UI Showcase</h2>
-<div align="center">
-<img width="800" src="https://github.com/xtwelzy/ai-scrum-master/assets/preview-example.png" alt="preview">
-</div>
-
 <h2 align="center">🧠 Как работает система</h2>
 
 <div align="left">
